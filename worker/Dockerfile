@@ -24,7 +24,6 @@ RUN dotnet publish -c release -o /app -a $TARGETARCH --self-contained false --no
 # app image
 FROM mcr.microsoft.com/dotnet/runtime:7.0@sha256:8cd26108e7a329458e5b84342816ae39b2b38bd041cfdc0b79b8cf1c0e0d376f
 WORKDIR /app
-COPY --from=build /app .
 COPY --chown=10001:10001 --from=build /app .
 
 USER 10001:10001

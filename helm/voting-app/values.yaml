@@ -1,0 +1,38 @@
+replicaCount:
+  vote: 2
+  result: 2
+  worker: 1
+images:
+  vote:
+    repository: ACCOUNT_ID.dkr.ecr.eu-north-1.amazonaws.com/voting-vote
+    tag: latest
+    pullPolicy: IfNotPresent
+  result:
+    repository: ACCOUNT_ID.dkr.ecr.eu-north-1.amazonaws.com/voting-result
+    tag: latest
+    pullPolicy: IfNotPresent
+  worker:
+    repository: ACCOUNT_ID.dkr.ecr.eu-north-1.amazonaws.com/voting-worker
+    tag: latest
+    pullPolicy: IfNotPresent
+redis:
+  image: redis:7.4-alpine
+postgres:
+  image: postgres:15-alpine
+  database: postgres
+  username: postgres
+  existingSecret: voting-db
+  passwordKey: POSTGRES_PASSWORD
+service:
+  type: ClusterIP
+  port: 80
+resources:
+  vote:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+  result:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+  worker:
+    requests: {cpu: 50m, memory: 96Mi}
+    limits: {cpu: 500m, memory: 384Mi}

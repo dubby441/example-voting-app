@@ -16,7 +16,7 @@ namespace Worker
         {
             try
             {
-                var pgsql = OpenDbConnection("Server=db;Username=postgres;Password=postgres;");
+                var pgsql = OpenDbConnection(BuildDbConnectionString());
                 var redisConn = OpenRedisConnection("redis");
                 var redis = redisConn.GetDatabase();
 
@@ -46,7 +46,7 @@ namespace Worker
                         if (!pgsql.State.Equals(System.Data.ConnectionState.Open))
                         {
                             Console.WriteLine("Reconnecting DB");
-                            pgsql = OpenDbConnection("Server=db;Username=postgres;Password=postgres;");
+                            pgsql = OpenDbConnection(BuildDbConnectionString());
                         }
                         else
                         { // Normal +1 vote requested
@@ -64,6 +64,15 @@ namespace Worker
                 Console.Error.WriteLine(ex.ToString());
                 return 1;
             }
+        }
+
+        private static string BuildDbConnectionString()
+        {
+            var host = Environment.GetEnvironmentVariable("DB_HOST") ?? "db";
+            var username = Environment.GetEnvironmentVariable("DB_USER") ?? "postgres";
+            var password = Environment.GetEnvironmentVariable("DB_PASSWORD") ?? "postgres";
+            var database = Environment.GetEnvironmentVariable("DB_NAME") ?? "postgres";
+            return $"Server={host};Username={username};Password={password};Database={database};";
         }
 
         private static NpgsqlConnection OpenDbConnection(string connectionString)

@@ -1,0 +1,18 @@
+flowchart LR
+    Browser --> Vote["Vote UI (Python)"]
+    Browser --> Result["Results UI (Node.js)"]
+    Vote --> Redis[("Redis queue")]
+    Redis --> Worker["Worker (.NET)"]
+    Worker --> Postgres[("PostgreSQL")]
+    Result --> Postgres
+    subgraph EKS["Amazon EKS"]
+      Vote
+      Result
+      Worker
+      Redis
+      Postgres
+    end
+    GitHub["GitHub Actions"] -->|OIDC| AWS["AWS IAM role"]
+    GitHub -->|build + Trivy scan + push SHA tags| ECR["Amazon ECR"]
+    ECR -->|pull images| EKS
+    AWS --> EKS

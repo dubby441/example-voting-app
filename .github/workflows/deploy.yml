@@ -1,0 +1,120 @@
+name: Build, scan, push, and deploy Voting App
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: voting-capstone-production
+  cancel-in-progress: false
+env:
+  AWS_REGION: eu-north-1
+  EKS_CLUSTER_NAME: voting-capstone
+  HELM_RELEASE: voting-capstone
+  K8S_NAMESPACE: voting
+
+jobs:
+  build-scan-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+      - name: Integration smoke test with Docker Compose
+        run: |
+          docker compose up -d --build --wait
+          curl --fail --retry 10 --retry-connrefused --retry-delay 2 http://localhost:8080/
+          curl --fail --retry 10 --retry-connrefused --retry-delay 2 http://localhost:8081/
+          docker compose down -v
+
+      - name: Build amd64 application images
+        run: |
+          docker build --platform linux/amd64 -t local/vote:${GITHUB_SHA} ./vote
+          docker build --platform linux/amd64 -t local/result:${GITHUB_SHA} ./result
+          docker build --platform linux/amd64 -t local/worker:${GITHUB_SHA} ./worker
+      - name: Trivy scan - vote
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: local/vote:${{ github.sha }}
+          format: table
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+      - name: Trivy scan - result
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: local/result:${{ github.sha }}
+          format: table
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+      - name: Trivy scan - worker
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: local/worker:${{ github.sha }}
+          format: table
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+      - name: Configure AWS credentials with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Get ECR registry
+        id: aws
+        run: |
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          echo "registry=${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com" >> "$GITHUB_OUTPUT"
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${{ steps.aws.outputs.registry }}"
+      - name: Push commit-SHA-tagged images
+        shell: bash
+        run: |
+          set -euo pipefail
+          for app in vote result worker; do
+            docker tag "local/${app}:${GITHUB_SHA}" "${{ steps.aws.outputs.registry }}/voting-${app}:${GITHUB_SHA}"
+            docker push "${{ steps.aws.outputs.registry }}/voting-${app}:${GITHUB_SHA}"
+          done
+      - name: Configure kubectl
+        run: aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+      - name: Create database Secret
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${DB_PASSWORD:-}" ]]; then
+            echo "Missing GitHub Actions secret DB_PASSWORD."
+            exit 1
+          fi
+          kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n "$K8S_NAMESPACE" create secret generic voting-db --from-literal=POSTGRES_PASSWORD="$DB_PASSWORD" --dry-run=client -o yaml | kubectl apply -f -
+      - name: Deploy with Helm
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm upgrade --install "$HELM_RELEASE" ./helm/voting-app \
+            --namespace "$K8S_NAMESPACE" \
+            --set-string images.vote.repository="${{ steps.aws.outputs.registry }}/voting-vote" \
+            --set-string images.result.repository="${{ steps.aws.outputs.registry }}/voting-result" \
+            --set-string images.worker.repository="${{ steps.aws.outputs.registry }}/voting-worker" \
+            --set-string images.vote.tag="${GITHUB_SHA}" \
+            --set-string images.result.tag="${GITHUB_SHA}" \
+            --set-string images.worker.tag="${GITHUB_SHA}" \
+            --wait --timeout 8m
+      - name: Verify deployment
+        run: |
+          kubectl -n "$K8S_NAMESPACE" get deployments,pods,services
+          helm -n "$K8S_NAMESPACE" status "$HELM_RELEASE"
