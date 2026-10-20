@@ -36,7 +36,7 @@ jobs:
           docker build --platform linux/amd64 -t local/result:${GITHUB_SHA} ./result
           docker build --platform linux/amd64 -t local/worker:${GITHUB_SHA} ./worker
       - name: Trivy scan - vote
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: local/vote:${{ github.sha }}
           format: table
@@ -45,7 +45,7 @@ jobs:
           ignore-unfixed: true
           exit-code: "0"
       - name: Trivy scan - result
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: local/result:${{ github.sha }}
           format: table
@@ -54,7 +54,7 @@ jobs:
           ignore-unfixed: true
           exit-code: "0"
       - name: Trivy scan - worker
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: local/worker:${{ github.sha }}
           format: table
